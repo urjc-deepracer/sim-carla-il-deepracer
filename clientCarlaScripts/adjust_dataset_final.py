@@ -27,20 +27,24 @@ def main():
     csv_paths = sorted(glob.glob(pattern))
 
     if not csv_paths:
-        print("Unable to find any dataset.csv")
+        print("No se encontraron dataset.csv en el directorio.")
         return
 
-    print(f"\nTracks found: {len(csv_paths)}")
-    print(f"Total VAL objective: {TARGET_VAL}\n")
+    print(f"\nCircuitos encontrados: {len(csv_paths)}")
+    print(f"Objetivo total validation: {TARGET_VAL}\n")
 
+    # Calcular target por circuito
 
     n_circuits = len(csv_paths)
     target_per_circuit = TARGET_VAL // n_circuits
     target_per_state = target_per_circuit // 3
 
-    print(f"Objective per track: {target_per_circuit}")
-    print(f"State objective in a track: {target_per_state}\n")
+    print(f"Objetivo por circuito: {target_per_circuit}")
+    print(f"Objetivo por estado dentro de circuito: {target_per_state}\n")
 
+
+    # Primero verificar mínimos reales
+ 
     min_available_state = None
 
     circuit_data = {}
@@ -49,7 +53,7 @@ def main():
         df = pd.read_csv(p)
 
         if "estado" not in df.columns:
-            print(f"{p} no state column")
+            print(f"{p} no tiene columna estado")
             continue
 
         df["estado"] = pd.to_numeric(df["estado"], errors="coerce")
@@ -72,17 +76,20 @@ def main():
         circuit_data[p] = df
 
     if min_available_state is None or min_available_state == 0:
-        print("Not enough data from a state")
+        print("No hay suficientes datos en algún estado.")
         return
 
+    # Ajustar target real por limitación de datos
     final_per_state = min(target_per_state, min_available_state)
 
-    print(f"\nMax possible state: {min_available_state}")
-    print(f"Final used state: {final_per_state}\n")
+    print(f"\nEstado máximo posible común: {min_available_state}")
+    print(f"Estado final usado: {final_per_state}\n")
 
     total_final = final_per_state * 3 * n_circuits
-    print(f"Total final validation: {total_final}\n")
+    print(f"Total final validation real: {total_final}\n")
 
+
+    # Balancear cada circuito
 
     for p, df in circuit_data.items():
 
@@ -112,7 +119,7 @@ def main():
 
         df_out.to_csv(p, index=False)
 
-    print("\nCorrectly balanced")
+    print("\nBalanceo completado correctamente.")
 
 
 if __name__ == "__main__":

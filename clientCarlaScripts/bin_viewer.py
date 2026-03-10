@@ -6,10 +6,10 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 BASE_DIR = "../datasets"
-MAX_POINTS_PER_SPLIT = 20000 
-N_BINS_STEER = 60
-N_BINS_THR   = 60 
-CLIP_PERCENTILE = 98 
+MAX_POINTS_PER_SPLIT = 20000   # máx puntos por split para el plot
+N_BINS_STEER = 60             # nº de cuadrados en eje X
+N_BINS_THR   = 60             # nº de cuadrados en eje Y
+CLIP_PERCENTILE = 98          # recortar histograma al p-ésimo percentil
 
 def load_split(pattern, name):
     paths = sorted(glob.glob(pattern))
@@ -52,6 +52,8 @@ def maybe_subsample(df, max_points, seed=42):
 
 
 def heatmap_one_split(df, title, cmap):
+ 
+    # Y fijo [0,1], Recorte al percentil CLIP_PERCENTILE, Normalización a [0,1] para oscurecer el mapa
 
     if df is None or df.empty:
         print(f"No data for {title}, skipping.")
@@ -78,6 +80,7 @@ def heatmap_one_split(df, title, cmap):
         range=[[x_min, x_max], [y_min, y_max]]
     )
 
+    # ----- recortar y normalizar para oscurecer -----
     nonzero = hist[hist > 0]
     if nonzero.size > 0:
         vmax_clip = np.percentile(nonzero, CLIP_PERCENTILE)
@@ -101,7 +104,7 @@ def heatmap_one_split(df, title, cmap):
     )
 
     cbar = plt.colorbar(im)
-    cbar.set_label(f"Density (0–1, clip {CLIP_PERCENTILE}%)")
+    cbar.set_label(f"Densidad (0–1, clip {CLIP_PERCENTILE}%)")
 
     plt.title(f"{title} – Heatmap (steer vs throttle)  n={n_valid}")
     plt.xlabel("Steer")
