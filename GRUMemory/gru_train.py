@@ -84,7 +84,7 @@ class CNN_GRU_FUSION(nn.Module):
 
 def main():
 
-    num_epochs = 25
+    num_epochs = 15
     batch_size = 32
     lr = 3e-4
     delta = 1e-4
@@ -216,8 +216,10 @@ def main():
             seq_imgs = seq_imgs.to(device).float()
             seq_speeds = seq_speeds.to(device).float()
             labels = labels.to(device).float()
+            seq_deviations = seq_deviations.to(device).float()
+            seq_deviations = seq_deviations / 100.0
 
-            out = model(seq_imgs, seq_speeds)
+            out = model(seq_imgs, seq_speeds, seq_deviations)
             test_mse += criterion_mse(out, labels).item()
 
     test_mse /= len(test_loader)
