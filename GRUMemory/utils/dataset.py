@@ -24,6 +24,7 @@ class SequenceDataset(Dataset):
         self.images = data["images"] 
         self.labels = data["labels"]
         self.speeds = data["speeds"]
+        self.controls = data["controls"]
         self.estados = data["estados"]
         self.deviations = data["deviations"]
 
@@ -34,21 +35,30 @@ class SequenceDataset(Dataset):
 
     def __getitem__(self, idx):
 
-        seq_imgs = self.images[idx]         # (T,3,66,200)
-        seq_speeds = self.speeds[idx]       # (T,)
+        seq_imgs = self.images[idx]
+        seq_speeds = self.speeds[idx]
         seq_deviations = self.deviations[idx]
+        seq_controls = self.controls[idx]
+
+        T_ctrl = seq_controls.shape[0]
+        seq_imgs = seq_imgs[:T_ctrl]
+        seq_speeds = seq_speeds[:T_ctrl]
+        seq_deviations = seq_deviations[:T_ctrl]
 
         if self.transform:
             seq_imgs = torch.stack([self.transform(img) for img in seq_imgs])
 
-        seq_speeds = seq_speeds.unsqueeze(-1)  # (T,1)
+        seq_speeds = seq_speeds.unsqueeze(-1)
         seq_deviations = seq_deviations.unsqueeze(-1)
+        seq_controls = seq_controls.float()
 
         label = self.labels[idx]
         estado = self.estados[idx]
 
-        return seq_imgs, seq_speeds, seq_deviations, label, estado
+        # print(seq_imgs.shape)
+        # print(seq_controls.shape)
 
+        return seq_imgs, seq_speeds, seq_deviations, seq_controls, label, estado
 
 
 def get_dataloaders(

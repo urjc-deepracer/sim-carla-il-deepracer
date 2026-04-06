@@ -148,21 +148,19 @@ class Visualizer:
 
     def on_key(self, event):
 
-        # navegación fluida
+
         if event.key == "right":
             self.seq_idx = min(self.seq_idx + 1, len(self.images)-1)
 
         elif event.key == "left":
             self.seq_idx = max(self.seq_idx - 1, 0)
 
-        # salto rápido
         elif event.key == "pageup":
             self.seq_idx = min(self.seq_idx + 50, len(self.images)-1)
 
         elif event.key == "pagedown":
             self.seq_idx = max(self.seq_idx - 50, 0)
 
-        # cambiar dataset
         elif event.key == "up":
             self.dataset_idx = (self.dataset_idx + 1) % len(self.folders)
             self.load_dataset()
@@ -171,7 +169,6 @@ class Visualizer:
             self.dataset_idx = (self.dataset_idx - 1) % len(self.folders)
             self.load_dataset()
 
-        # cambiar tiempo
         elif event.key == "w":
             self.seconds_step += 0.05
             self.update_jump()
@@ -180,13 +177,12 @@ class Visualizer:
             self.seconds_step = max(0.01, self.seconds_step - 0.05)
             self.update_jump()
 
-        # 🔥 SALTO DIRECTO POR INPUT
         elif event.key == "enter":
             try:
-                idx = int(input("Ir a secuencia: "))
+                idx = int(input("Go to seq: "))
                 self.seq_idx = max(0, min(idx, len(self.images)-1))
             except:
-                print("Input inválido")
+                print("Invalid input")
 
         elif event.key == "q":
             plt.close(self.fig)
@@ -194,22 +190,19 @@ class Visualizer:
         self.update()
 
 
-# ==========================================
-# MAIN
-# ==========================================
 def main():
 
     vis = Visualizer(ROOT)
 
     print("""
-🎮 CONTROLES:
-→ / ← navegar
-PageUp / PageDown saltos grandes
-↑ ↓ cambiar dataset
-w / s cambiar Δt
-ENTER escribir índice
-q salir
-""")
+        CONTROLS:
+        → / ← navigate
+        PageUp / PageDown big steps
+        ↑ ↓ change dataset
+        w / s change Δt
+        ENTER write index
+        q quit
+        """)
 
     plt.show()
 

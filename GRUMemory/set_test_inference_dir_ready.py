@@ -1,90 +1,123 @@
 import os
 import csv
 import shutil
+import sys
 
 NUM_IMGS = 10
-DT = 0.2  # segundos
+DT = 0.2  # second delay in seqs
 OUTPUT_DIR = "test_inference_dir"
 
 
-def select_sequence(folder, dt, num_imgs):
-
+def load_rows(folder):
     csv_path = os.path.join(folder, "dataset.csv")
+    if not os.path.isfile(csv_path):
+        raise FileNotFoundError(f"does not exist: {csv_path}")
 
     rows = []
-    with open(csv_path) as f:
+    with open(csv_path, newline="") as f:
         reader = csv.DictReader(f)
         for row in reader:
+            if "timestamp" not in row:
+                raise ValueError("CSV does not have 'timestamp'")
+            if "mask_path" not in row:
+                raise ValueError("CSV does not have 'mask_path'")
+
+            try:
+                row["_timestamp"] = float(row["timestamp"])
+            except Exception:
+                continue
+
             rows.append(row)
 
-    if len(rows) == 0:
-        raise ValueError("Dataset vacío")
+    if not rows:
+        raise ValueError("Empty dataset or invalid timestamps")
 
+    rows.sort(key=lambda r: r["_timestamp"])
+    return rows
+
+
+def build_sequence_from_start(rows, start_idx, dt, num_imgs):
     selected = []
-    start_idx = 0
+    current_pos = start_idx
+    t0 = rows[start_idx]["_timestamp"]
 
-    while start_idx < len(rows):
+    for k in range(num_imgs):
+        target_time = t0 + k * dt
 
-        selected = [rows[start_idx]]
-        last_time = float(rows[start_idx]["timestamp"])
+        found_idx = None
+        for j in range(current_pos, len(rows)):
+            if rows[j]["_timestamp"] >= target_time:
+                found_idx = j
+                break
 
-        for i in range(start_idx + 1, len(rows)):
-            t = float(rows[i]["timestamp"])
+        if found_idx is None:
+            return None
 
-            if t - last_time >= dt:
-                selected.append(rows[i])
-                last_time = t
+        selected.append(rows[found_idx])
+        current_pos = found_idx + 1
 
-            if len(selected) == num_imgs:
-                return selected
+    return selected
 
-        start_idx += 1
 
-    raise ValueError("No se pudo construir secuencia con ese dt")
+def select_sequence(folder, dt, num_imgs):
+    rows = load_rows(folder)
+
+    for start_idx in range(len(rows)):
+        seq = build_sequence_from_start(rows, start_idx, dt, num_imgs)
+        if seq is not None:
+            return seq
+
+    raise ValueError(
+        f"Unable to build a {num_imgs} images seq with dt={dt}"
+    )
+
+
+def prepare_output_dir():
+    if os.path.isdir(OUTPUT_DIR):
+        shutil.rmtree(OUTPUT_DIR)
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 
 def copy_and_create(folder, selected_rows):
-
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    prepare_output_dir()
 
     out_csv_path = os.path.join(OUTPUT_DIR, "dataset.csv")
 
+    clean_rows = []
+    for i, row in enumerate(selected_rows):
+        img_rel = row["mask_path"].lstrip("/")
+        img_src = os.path.join(folder, img_rel)
+
+        if not os.path.isfile(img_src):
+            raise FileNotFoundError(f"Image: {img_src} does not exist")
+
+        new_name = f"{i:03d}.png"
+        img_dst = os.path.join(OUTPUT_DIR, new_name)
+        shutil.copy2(img_src, img_dst)
+
+        new_row = dict(row)
+        new_row["mask_path"] = new_name
+        new_row.pop("_timestamp", None)
+        clean_rows.append(new_row)
+
     with open(out_csv_path, "w", newline="") as f:
-        writer = None
+        writer = csv.DictWriter(f, fieldnames=clean_rows[0].keys())
+        writer.writeheader()
+        writer.writerows(clean_rows)
 
-        for i, row in enumerate(selected_rows):
-
-            img_rel = row["mask_path"].lstrip("/")
-            img_src = os.path.join(folder, img_rel)
-
-            new_name = f"{i:03d}.png"
-            img_dst = os.path.join(OUTPUT_DIR, new_name)
-
-            shutil.copy(img_src, img_dst)
-
-            row["mask_path"] = new_name
-
-            if writer is None:
-                writer = csv.DictWriter(f, fieldnames=row.keys())
-                writer.writeheader()
-
-            writer.writerow(row)
-
-    print(f"[OK] Secuencia guardada en {OUTPUT_DIR}")
+    print(f"[OK] Sequence loaded on {OUTPUT_DIR}")
+    print("[INFO] Selected timestamps:")
+    for r in clean_rows:
+        print(r["timestamp"])
 
 
 def main():
-
-    import sys
-
     if len(sys.argv) < 2:
-        print("Uso: python set_test_inference_dir_ready.py <ruta_dataset>")
+        print("Usage: python set_test_inference_dir_ready.py <ruta_dataset>")
         return
 
     folder = sys.argv[1]
-
     selected = select_sequence(folder, DT, NUM_IMGS)
-
     copy_and_create(folder, selected)
 
 

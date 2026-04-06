@@ -16,14 +16,13 @@ from utils.dataset import (
     mse_to_pct
 )
 
-
+#CNN → concat features → 1 GRU → FC
 class CNN_GRU_FUSION(nn.Module):
     def __init__(self):
         super().__init__()
 
-
-        # CNN → images
-
+   
+        # Images CNN
         self.cnn = nn.Sequential(
             nn.Conv2d(3, 24, kernel_size=5, stride=2),
             nn.ReLU(),
@@ -34,57 +33,68 @@ class CNN_GRU_FUSION(nn.Module):
             nn.Flatten()
         )
 
+        # Get CNN output size
         with torch.no_grad():
             dummy = torch.zeros(1, 3, 66, 200)
             self.cnn_out_size = self.cnn(dummy).shape[1]
 
-        # One GRU with 2 features
 
-        self.gru_dyn = nn.GRU(
-            input_size=2,   # speed + deviation
-            hidden_size=32,
+        # Unique GRU (all data at once)
+        self.gru = nn.GRU(
+            input_size=self.cnn_out_size + 2 + 2,  # img + (speed,dev) + (steer,throttle)
+            hidden_size=64,
             batch_first=True
         )
 
         # Final fusion
- 
         self.fc = nn.Sequential(
-            nn.Linear(self.cnn_out_size + 32, 100),
+            nn.Linear(64, 100),
             nn.ReLU(),
-            nn.Linear(100, 2)   # steer, throttle
+            nn.Linear(100, 2)  # steer, throttle
         )
 
-    def forward(self, images, speeds, deviations):
+    def forward(self, images, speeds, deviations, controls):
+
+        # Ensure seqs have same length
+        T = min(
+            images.shape[1],
+            speeds.shape[1],
+            deviations.shape[1],
+            controls.shape[1]
+        )
+
+        images = images[:, :T]
+        speeds = speeds[:, :T]
+        deviations = deviations[:, :T]
+        controls = controls[:, :T]
+
+        controls = controls.detach()
 
         B, T, C, H, W = images.shape
 
-
-        # CNN per frame
-
-        x = images.view(B * T, C, H, W)
+        
+        # CNN
+        x = images.view(B*T, C, H, W)
         feats_img = self.cnn(x)
         feats_img = feats_img.view(B, T, -1)
 
-        # last frame
-        feats_img = feats_img[:, -1, :]   # (B, cnn_out)
+        # CONCAT Speeds and DEVs
+        dyn = torch.cat([speeds, deviations], dim=2)      # (B,T,2)
 
+        controls = controls[:, :T]
 
-        # GRU with 2 features speed and deviation
-   
-        dyn = torch.cat([speeds, deviations], dim=2)   # (B, T, 2)
-        out_dyn, _ = self.gru_dyn(dyn)
-        feats_dyn = out_dyn[:, -1, :]  # (B, 32)
+        # CONCAT ALL
+        fused_seq = torch.cat([feats_img, dyn, controls], dim=2)  # (B,T,F)
 
+        # Unique GRU
+        out, _ = self.gru(fused_seq)
+        feat = out[:, -1, :]   # (B,64)
 
-        # Fusion
-  
-        fused = torch.cat([feats_img, feats_dyn], dim=1)
-
-        return self.fc(fused)
+        return self.fc(feat)
 
 def main():
 
-    num_epochs = 15
+    num_epochs = 40
     batch_size = 32
     lr = 3e-4
     delta = 1e-4
@@ -111,12 +121,13 @@ def main():
 
     print(f"Train: {len(train_dataset)} | Val: {len(val_dataset)} | Test: {len(test_dataset)}")
 
-    print("\n===== DATA DEBUG =====")
+    print("\n----- DATA DEBUG -----")
     sample = train_dataset[0]
     print("Seq imgs shape:", sample[0].shape)      # (T, C, H, W)
     print("Seq speeds shape:", sample[1].shape)   # (T, 1)
-    print("Label:", sample[2])                    # (2,)
-    print("Estado:", sample[3])
+    print("Seq controls shape:", sample[3].shape)
+    print("Label:", sample[4])
+    print("Estado:", sample[5])
     print("======================\n")
 
     w_global = compute_class_weights(train_dataset.estados, device)
@@ -137,8 +148,7 @@ def main():
         model.train()
         train_loss = 0.0
 
-        for i, (seq_imgs, seq_speeds, seq_deviations, labels, estados) in enumerate(train_loader):
-
+        for i, (seq_imgs, seq_speeds, seq_deviations, seq_controls, labels, estados) in enumerate(train_loader):
             if epoch == 0 and i == 0:
                 print("\n===== BATCH DEBUG =====")
                 print("seq_imgs shape:", seq_imgs.shape)       # (B, T, C, H, W)
@@ -152,9 +162,10 @@ def main():
             seq_deviations = seq_deviations.to(device).float()
             seq_deviations = seq_deviations / 100.0
             labels = labels.to(device).float()
+            seq_controls = seq_controls.to(device).float()
             estados = estados.to(device).long()
 
-            out = model(seq_imgs, seq_speeds, seq_deviations)
+            out = model(seq_imgs, seq_speeds, seq_deviations, seq_controls)
 
             if epoch == 0 and i == 0:
                 print("\n===== MODEL OUTPUT DEBUG =====")
@@ -180,14 +191,15 @@ def main():
         val_mse = 0.0
 
         with torch.no_grad():
-            for seq_imgs, seq_speeds, seq_deviations, labels, _ in val_loader:
+            for seq_imgs, seq_speeds, seq_deviations, seq_controls, labels, _ in val_loader:
                 seq_imgs = seq_imgs.to(device).float()
                 seq_speeds = seq_speeds.to(device).float()
+                seq_controls = seq_controls.to(device).float()
                 seq_deviations = seq_deviations.to(device).float()
                 seq_deviations = seq_deviations / 100.0
                 labels = labels.to(device).float()
 
-                out = model(seq_imgs, seq_speeds, seq_deviations)
+                out = model(seq_imgs, seq_speeds, seq_deviations, seq_controls)
                 val_mse += criterion_mse(out, labels).item()
 
         val_mse /= len(val_loader)
@@ -212,17 +224,25 @@ def main():
     test_mse = 0.0
 
     with torch.no_grad():
-        for seq_imgs, seq_speeds, seq_deviations, labels, _ in test_loader:
+        for seq_imgs, seq_speeds, seq_deviations, seq_controls, labels, _ in test_loader:
             seq_imgs = seq_imgs.to(device).float()
             seq_speeds = seq_speeds.to(device).float()
             labels = labels.to(device).float()
             seq_deviations = seq_deviations.to(device).float()
             seq_deviations = seq_deviations / 100.0
 
-            out = model(seq_imgs, seq_speeds, seq_deviations)
+            seq_controls = seq_controls.to(device).float()
+
+            out = model(seq_imgs, seq_speeds, seq_deviations, seq_controls)
+            mse = nn.MSELoss()(out, labels)
             test_mse += criterion_mse(out, labels).item()
 
     test_mse /= len(test_loader)
+    
+    print("\n===== TEST RESULT =====")
+    print(f"Test MSE: {test_mse:.6f}")
+    print(f"Test RMSE: {test_mse**0.5:.6f}")
+    print(f"Test % error: {(test_mse**0.5)*100:.2f}%")
 
     writer.add_scalar("Loss/Test", test_mse, 0)
     writer.close()
@@ -240,15 +260,16 @@ def main():
     dummy_imgs = torch.randn(1, seq_len, 3, 66, 200).to(device)
     dummy_speeds = torch.randn(1, seq_len, 1).to(device)
     dummy_devs = torch.randn(1, seq_len, 1).to(device)
+    dummy_controls = torch.randn(1, seq_len-1, 2).to(device)
 
     torch.onnx.export(
         model,
-        (dummy_imgs, dummy_speeds, dummy_devs),
+        (dummy_imgs, dummy_speeds, dummy_devs, dummy_controls),
         net_file_name,
         verbose=False,
         export_params=True,
         opset_version=9,
-        input_names=["images", "speeds"],
+        input_names=["images", "speeds", "deviations", "controls"],
         output_names=["output"],
     )
 

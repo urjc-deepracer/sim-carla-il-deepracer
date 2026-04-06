@@ -26,6 +26,7 @@ def generate_and_save(base_path, save_path):
     all_seq_estados = []
     all_seq_speeds = []
     all_seq_deviations = []
+    all_seq_controls = []
 
     for folder in folders:
 
@@ -35,7 +36,7 @@ def generate_and_save(base_path, save_path):
         if not os.path.exists(csv_path):
             continue
 
-        images, labels, estados, speeds, deviations = [], [], [], [], []
+        images, labels, estados, speeds, deviations, controls = [], [], [], [], [], []
 
         with open(csv_path) as f:
             reader = csv.DictReader(f)
@@ -63,6 +64,7 @@ def generate_and_save(base_path, save_path):
                 estados.append(estado)
                 speeds.append(speed)
                 deviations.append(deviation)
+                controls.append([steer, throttle])
 
 
         if len(images) == 0:
@@ -73,14 +75,16 @@ def generate_and_save(base_path, save_path):
         estados = torch.tensor(estados)
         speeds = torch.tensor(speeds)
         deviations = torch.tensor(deviations)
+        controls = torch.tensor(controls)
 
         i = 0
         # 
         while i + (SEQ_LEN - 1) * DT < len(images):
             idxs = [int(i + k * DT) for k in range(SEQ_LEN)]
             seq = images[idxs]
-            seq_speeds = speeds[idxs]
+            seq_speeds = speeds[idxs[:-1]]
             seq_deviations = deviations[idxs]
+            seq_controls = controls[idxs[:-1]]   # hasta t-1
 
             end = idxs[-1]
 
@@ -89,12 +93,14 @@ def generate_and_save(base_path, save_path):
             all_seq_estados.append(estados[end])
             all_seq_speeds.append(seq_speeds)
             all_seq_deviations.append(seq_deviations)
+            all_seq_controls.append(seq_controls)
 
             i += SEQ_LEN * DT
 
     torch.save({
         "images": all_seq_imgs,
         "speeds": all_seq_speeds,
+        "controls": all_seq_controls,
         "labels": torch.stack(all_seq_labels),
         "estados": torch.stack(all_seq_estados),
         "deviations": torch.stack(all_seq_deviations)
@@ -105,8 +111,14 @@ def generate_and_save(base_path, save_path):
 
 def load_sequences(path):
     data = torch.load(path)
-    return data["images"], data["speeds"], data["deviations"], data["labels"], data["estados"]
-
+    return (
+        data["images"],
+        data["speeds"],
+        data["deviations"],
+        data["controls"], 
+        data["labels"],
+        data["estados"]
+    )
 
 if not os.path.exists(TRAIN_PATH):
     generate_and_save(ROOT, TRAIN_PATH)
