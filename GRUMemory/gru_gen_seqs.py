@@ -5,7 +5,9 @@ from torchvision import transforms
 
 ROOT = "../datasets"
 SEQ_LEN = 10
-DT = 0.2
+WANTED_STEP_TIME = 0.2
+FPS = 30
+STEP_FRAMES = int(FPS * WANTED_STEP_TIME)
 
 TRAIN_PATH = "train.pt"
 VAL_PATH   = "val.pt"
@@ -79,31 +81,36 @@ def generate_and_save(base_path, save_path):
 
         i = 0
         # 
-        while i + (SEQ_LEN - 1) * DT < len(images):
-            idxs = [int(i + k * DT) for k in range(SEQ_LEN)]
-            seq = images[idxs]
-            seq_speeds = speeds[idxs[:-1]]
-            seq_deviations = deviations[idxs]
-            seq_controls = controls[idxs[:-1]]   # hasta t-1
 
-            end = idxs[-1]
+        SEQ_LEN_PLUS = 11
 
-            all_seq_imgs.append(seq)
-            all_seq_labels.append(labels[end])
-            all_seq_estados.append(estados[end])
-            all_seq_speeds.append(seq_speeds)
-            all_seq_deviations.append(seq_deviations)
-            all_seq_controls.append(seq_controls)
+        while i + (SEQ_LEN_PLUS - 1) * STEP_FRAMES < len(images):
 
-            i += SEQ_LEN * DT
+            idxs = [i + k * STEP_FRAMES for k in range(SEQ_LEN_PLUS)]
+            
+            all_seq_imgs.append(images[idxs[1:]])      # Frames 1 to 10
+            all_seq_speeds.append(speeds[idxs[1:]])    # Frames 1 to 10
+            all_seq_deviations.append(deviations[idxs[1:]])
+            
+            # Storing controls from index 0 to 9 (10 elements). 
+            #The initial control (index 0) acts as the 'previous state' for the first image (index 1).
+            all_seq_controls.append(controls[idxs[:-1]]) 
+            
+            # Storing 10 control elements (indices 0-9). 
+            #Control at index 0 serves as the 'previous action' for the image at index 1.
+            
+            all_seq_labels.append(labels[idxs[-1]])
+            all_seq_estados.append(estados[idxs[-1]])
+            
+            i += 1
 
     torch.save({
         "images": all_seq_imgs,
         "speeds": all_seq_speeds,
         "controls": all_seq_controls,
         "labels": torch.stack(all_seq_labels),
-        "estados": torch.stack(all_seq_estados),
-        "deviations": torch.stack(all_seq_deviations)
+        "estados": torch.stack(all_seq_estados) if all_seq_estados else torch.tensor([]),
+        "deviations": all_seq_deviations 
     }, save_path)
 
     print(f"[OK] Saved {save_path} with {len(all_seq_imgs)} sequencies\n")
@@ -129,9 +136,9 @@ if not os.path.exists(VAL_PATH):
 if not os.path.exists(TEST_PATH):
     generate_and_save(os.path.join(ROOT, "test"), TEST_PATH)
 
-train_imgs, train_speeds, train_labels, train_estados = load_sequences(TRAIN_PATH)
-val_imgs, val_speeds, val_labels, val_estados = load_sequences(VAL_PATH)
-test_imgs, test_speeds, test_labels, test_estados = load_sequences(TEST_PATH)
+train_imgs, train_speeds, train_devs, train_ctrls, train_labels, train_estados = load_sequences(TRAIN_PATH)
+val_imgs, val_speeds, val_devs, val_ctrls, val_labels, val_estados = load_sequences(VAL_PATH)
+test_imgs, test_speeds, test_devs, test_ctrls, test_labels, test_estados = load_sequences(TEST_PATH)
 
 print("====================================")
 print(f"Train: {len(train_imgs)} | speeds: {len(train_speeds)}")
